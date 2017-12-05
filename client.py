@@ -1,5 +1,11 @@
 import socket, sys, select, pickle, os
 
+def beep():
+	os.system("aplay -q beep.wav")
+	#duration = 100
+	#frequency = 4000
+	#os.system('play -n synth %s sin %s' % (duration/1000, frequency))
+
 def clear():
 	os.system("clear")
 
@@ -62,6 +68,7 @@ while True:
 				sys.exit(1)
 			else:
 				print(msg)
+				beep()
 
 		# Marco significa que outro utilizou msg?		
 		else:
