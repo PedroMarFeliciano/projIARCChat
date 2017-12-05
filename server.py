@@ -1,31 +1,24 @@
 import select, socket, pickle
 from datetime import datetime
 
-
-def writeToFile(chatMessages):
-    instant = datetime.now()
-    date = "["+str(instant.day)+"/"+str(instant.month)+"/"+str(instant.year)+"-"
-    date = date +str(instant.hour)+":"+str(instant.minute)+":"+str(instant.second)+"]"
-
-    with open("chat_history.txt", "a") as f:
-
-        f.write(date + " - " + chatMessages + "\n")
-        f.close()
-
 # Cria socket TCP/IP
 try:
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    #ao inicio todas as conexões sao bloqueadoras.
+    #Com esta função deixam de o ser. setblobcking(0 ou 1)
     server.setblocking(0)
 except socket.error:
-    print("Erro no socket.")
+    print("Erro no socket. ")
 
-server_address = ('localhost', 50051)
+server_address = ('localhost', 50056)
 print ('starting up on: %s, port: %s' %server_address)
 
-
+##para que serve o bind?
+#Para evitar que outra aplicação corra no porto 50055
 server.bind(server_address)
 server.listen(5)
 # inputs e' a lista de sockets dos quais vamos ler
+#Lista de todos os sockets dos quais vamos ler a informação.
 inputs = [server]
 
 # outputs e' a lista de sockets nos quais vamos escrever
@@ -34,11 +27,62 @@ outputs = []
 # fila de mensagens para enviar
 messages = []
 
-# dicionario que lista o apelido dos usuarios e seus sockets
-users = {}
+#Dicionario{chave - nome de utilizador; valor - socket}
+#O valor de cada chave é um tuplo com 2 elementos:
+usersip = {}
 
-# lista com o nome dos usuarios
-users_list = []
+#Dicionário que armazena a lista de bloqueios por utilizador
+blocks = {}
+
+# dicionário que cuja chave é o nome do grupo e o valor é uma lista de sockets, de
+# todos que participam da conversa
+groups = {}
+
+
+def addToHistory(msg):
+    instant = datetime.now()
+    date = "["+str(instant.day)+"/"+str(instant.month)+"/"+str(instant.year)+"-"
+    date = date +str(instant.hour)+":"+str(instant.minute)+":"+str(instant.second)+"]"
+
+    with open("chat_history.txt", "a") as ch:
+
+        ch.write(date + " " + msg + "\n")
+        ch.close()
+
+# envia, para o utilizador que fez a requisição, a lista de usuarios online
+def user_list(requester_socket):
+    lst = ""
+    for nick in usersip.keys():
+        lst = lst + nick + "\n" + " " * 22
+    lst = "Utilizadores ligados: " + lst
+    requester_socket.send(lst.encode())
+
+
+#Marco adiciona o user ao dicionario users e ao dicionarios bloqueios
+#no dicionarios bloqueios o valor é inicializado com uma lista vazia.
+#no início ainda não há utilizadores bloqueados
+#retorna True para nicks únicos e False quando já existe um utlizador
+#utlizando esse apelido.
+def val_nick(nick, addr):
+    if (nick not in usersip.keys()):
+        usersip.setdefault(nick,addr)
+        blocks.setdefault(nick,[])
+        print("novo user adicionado\t" + nick)
+        return True
+    return False
+
+# função para verificar se o nome do grupo existe no dicionario que guarda todos
+# os nomes de grupos
+def notExistingGroup(group_name):
+    if group_name not in groups.keys():
+        return True
+    return False
+
+# verifica se um usuário está ou não em um determinado grupo
+def userNotInGroup(user, group_name):
+    if user not in groups[group_name]:
+        return True
+    return False
 
 while inputs:
     readable, writable, exceptional = select.select(inputs, outputs, inputs)
@@ -48,45 +92,144 @@ while inputs:
         if sock is server:
             connection, client_adress = sock.accept()
             print("Nova conexao de ", client_adress)
-
+            
+            # garante que os apelidos sejam únicos
             unique = False
 
             while not unique:
                 new_user_nickname = connection.recv(4096).decode()
 
-                if new_user_nickname not in users:
-                    unique = True
+                # guarda o apelido do novo usuario e também seu endereço IP e porto
+                unique = val_nick(new_user_nickname, connection)
 
                 connection.send(pickle.dumps(unique))
-
-            # guarda o apelido do novo usuario e também seu socket
-            users[new_user_nickname] = connection
-            users_list.append(new_user_nickname)
-
-            for u in users_list:
-                print(u)
-            connection.setblocking(0)
-            # envia a lista de usuarios conectados para o cliente
-            users_list_ser = pickle.dumps(users_list)
-            print("aqui: ", users_list_ser)
-            connection.send(users_list_ser)
             
-
             inputs.append(connection)
             outputs.append(connection)
-            
-        # caso nao seja o socket do servidor, e uma mensagem
+
+        # caso não seja o socket do servidor, é uma mensagem
         else:
-            data = sock.recv(4096).decode()
+            data = sock.recv(1024).decode() #decodifica a mensagem enviada
+            #Só é necessário fazer se o servidor precisar de tratar a mensagem.
+            messages.append(data)
 
             if data:
-                print("Recebi a mensagem '%s' de '%s'" % (data, sock.getpeername()))
-                
-                messages.append(data)
+                #Marco Cria uma lista com a mensagem recebida
+                #nick[0],comando[1], mensagem ou user a bloquear
+                proc_data = data.split(" ")
+                nick = proc_data[0]
+                cmd = proc_data[1]
 
-                writeToFile(data)
+                #Mensagem de grupo
+                if(cmd == ".grp"):
+                    # proc_data[2] é o comando ou nome do grupo
 
-                serialized_msgs = pickle.dumps(messages)
+                    # caso o utilizador queira criar um grupo
+                    if proc_data[2] == 'crt':
+                        # proc_data[3] é o nome do grupo
 
-                for s in outputs:
-                    s.send(serialized_msgs)
+                        # verifica se esse nome está em uso
+                        if notExistingGroup(proc_data[3]):
+                            # cria uma nova entrada no dicionario de grupos
+                            groups[proc_data[3]] = [usersip[nick]]
+
+                            sock.send('Grupo criado com sucesso.'.encode())
+                            print("Grupo", proc_data[3], "criado.")
+                        else:
+                            sock.send('Esse nome já está em uso. Tente outro.'.encode())
+
+                    # adiciona um usuário
+                    elif proc_data[2] == 'add':
+                        # proc_data[3] é o nome do grupo e proc_data[4] o apelido do
+                        # usuário que tentam adicionar ao grupo
+
+                        # verifica se o grupo existe
+                        if notExistingGroup(proc_data[3]):
+                            sock.send("Esse grupo ainda não foi criado.".encode())
+                        # verifica se o usuario que tenta adicionar um integrante ao
+                        # grupo faz parte desse grupo
+                        elif userNotInGroup(usersip[nick], proc_data[3]):
+                            sock.send('Você não faz parte desse grupo.'.encode())
+                        # adiciona um novo usuário ao grupo
+                        else:
+                            msg = "Você foi adicionado ao grupo " + proc_data[3]
+                            usersip[proc_data[4]].send(msg.encode())
+                            groups[proc_data[3]].append(usersip[proc_data[4]])
+                    
+                    # remove um usuário
+                    elif proc_data[2] == 'rem':
+                        # proc_data[3] é o nome do grupo e proc_data[4] o apelido do
+                        # usuário que tentam remover do grupo
+
+                        # verifica se o grupo existe
+                        if notExistingGroup(proc_data[3]):
+                            sock.send("Esse grupo ainda não foi criado.".encode())
+                        # verifica se o usuario que tenta remover um integrante do
+                        # grupo faz parte desse grupo
+                        elif userNotInGroup(usersip[nick], proc_data[3]):
+                            sock.send('Você não faz parte desse grupo.'.encode())
+                        # remove o socket do usuário da lista de sockets daquele grupo
+                        else:
+                            msg = "Você foi removido do grupo " + proc_data[3]
+                            usersip[proc_data[4]].send(msg.encode())
+                            groups[proc_data[3]].remove(usersip[proc_data[4]])
+
+                    # envia mensagem para o grupo
+                    elif proc_data[2] in groups.keys():
+                        # verifica se o grupo existe
+                        if notExistingGroup(proc_data[2]):
+                            sock.send("Esse grupo ainda não foi criado.".encode())
+                        # verifica se o usuario que tenta remover um integrante do
+                        # grupo faz parte desse grupo
+                        elif userNotInGroup(usersip[nick], proc_data[2]):
+                            sock.send('Você não faz parte desse grupo.'.encode())
+                        # envia a mensagem
+                        else:
+                            msg = nick+' disse no '+proc_data[2]+': '+" ".join(proc_data[2::])
+                            addToHistory(msg)
+
+                            for u in groups[proc_data[2]]:
+                                u.send(msg.encode())
+
+                # lista os utilizadores online
+                elif cmd == ".lst":
+                    user_list(sock)
+
+                # bloqueia ou desbloqueia um usuario
+                elif cmd == ".block":
+                    # se o usuario já estiver na lista de bloqueio ele é removido
+                    # caso contrário é adicionado
+                    if proc_data[2] in blocks[nick]:
+                        blocks[nick].remove(proc_data[2])
+                    else:
+                        blocks[nick].append(proc_data[2])
+
+                #Mensagem privada
+                elif(cmd == ".priv"):
+                    #Valida se o recetor existe
+                    if proc_data[2] not in usersip.keys():
+                        sock.send("Utilizador inexistente.".encode())
+                    
+                    # teste se o usuario que enviou a mensagem está na lista de bloqueio
+                    # do destinatário
+                    elif nick not in blocks[proc_data[2]]:
+                        # envia a mensagem para o utilizador destino
+                        msg = " ".join(proc_data[3::])
+                        addToHistory(nick + " disse privadamente para " + proc_data[2] + msg)
+                        msg = nick + " diz privadamente: " + msg
+                        usersip[proc_data[2]].send(msg.encode())
+                    
+                    else:
+                        sock.send("Você foi bloqueado por esse utilizador.".encode())
+
+            else:
+                print("Cliente desconectou")
+                inputs.remove(sock)
+                outputs.remove(sock)
+
+
+
+                sock.close()
+
+
+
