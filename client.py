@@ -2,28 +2,27 @@ import socket, sys, select, pickle, os
 
 def beep():
 	os.system("aplay -q beep.wav")
-	#duration = 100
-	#frequency = 4000
-	#os.system('play -n synth %s sin %s' % (duration/1000, frequency))
 
 def clear():
 	os.system("clear")
 
-
 def helpMenu():
 	print("Comandos úteis:")
 	print("Acções disponíveis:")
-	print("Listar utilizadores online...: .lst")
-	print("Criar grupo..................: .grp crt <nome do grupo>")
-	print("Adiciona utilizador ao grupo.: .grp add <nome do grupo> <nome utilizador>")
-	print("Remove utilizador do grupo...: .grp rem <nome do grupo> <nome utilizador>")
-	print("Mensagem de grupo............: .grp <nome do grupo> <mensagem>")
-	print("Mensagem privada.............: .priv <nome do utilizador> <mensagem>")
-	print("Bloquear utilizador..........: .block <nome do usuario>")
-	print("Limpa o ecrã.................: .clear")
-	print("-"*60 + '\n')
+	print("Mostra menu de ajuda...........: .help")
+	print("Listar utilizadores online.....: .lst")
+	print("Criar grupo....................: .grp crt <nome do grupo>")
+	print("Adiciona utilizador ao grupo...: .grp add <nome do grupo> <nome utilizador>")
+	print("Remove utilizador do grupo.....: .grp rem <nome do grupo> <nome utilizador>")
+	print("Mensagem de grupo..............: .grp <nome do grupo> <mensagem>")
+	print("Lista de grupos que pertence...: .grp lst")
+	print("Mensagem privada...............: .priv <nome do utilizador> <mensagem>")
+	print("Bloquear/desbloquear utilizador: .block <nome do usuario>")
+	print("Limpa o ecrã...................: .clear")
+	print("Desativar/ativar alerta sonoro.: .som")
+	print("-"*80 + '\n')
 
-server_address = ('localhost', 50056)
+server_address = ('localhost', 50057)
 
 server_connection = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 server_connection.connect(server_address)
@@ -50,10 +49,10 @@ clear()
 
 print("Bem vindo(a) ao chat,", nickname + '.')
 helpMenu()
-print("Para ver a lista de comandos mais uma vez digite .help")
 
 # lista de sockets a ser ouvida pelo select
 sockets = [server_connection, sys.stdin]
+sound = True
 
 while True:
 	read_sockets, write_sockets, error_sockets = select.select(sockets, [], [])
@@ -68,7 +67,8 @@ while True:
 				sys.exit(1)
 			else:
 				print(msg)
-				beep()
+				if sound:
+					beep()
 
 		# Marco significa que outro utilizou msg?		
 		else:
@@ -78,6 +78,13 @@ while True:
 				helpMenu()
 			elif inp == '.clear':
 				clear()
+			elif inp == '.som':
+				if sound:
+					sound = False
+					print("Alerta sonoro desligado.")
+				else:
+					sound = True
+					print("Alerta sonoro ligado.")
 			else:
 				msg = nickname + " " +  inp
 				server_connection.send(msg.encode())

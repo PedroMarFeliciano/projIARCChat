@@ -10,22 +10,18 @@ try:
 except socket.error:
     print("Erro no socket. ")
 
-server_address = ('localhost', 50056)
+server_address = ('localhost', 50057)
 print ('starting up on: %s, port: %s' %server_address)
 
-##para que serve o bind?
 #Para evitar que outra aplicação corra no porto 50055
 server.bind(server_address)
 server.listen(5)
-# inputs e' a lista de sockets dos quais vamos ler
+
 #Lista de todos os sockets dos quais vamos ler a informação.
 inputs = [server]
 
 # outputs e' a lista de sockets nos quais vamos escrever
 outputs = []
-
-# fila de mensagens para enviar
-messages = []
 
 #Dicionario{chave - nome de utilizador; valor - socket}
 #O valor de cada chave é um tuplo com 2 elementos:
@@ -166,26 +162,33 @@ while inputs:
                             sock.send("Esse grupo ainda não foi criado.".encode())
                         # verifica se o usuario que tenta remover um integrante do
                         # grupo faz parte desse grupo
-                        elif userNotInGroup(usersip[nick], proc_data[3]):
-                            sock.send('Você não faz parte desse grupo.'.encode())
+                        elif usersip[nick] != groups[proc_data[3]].index(0):
+                            sock.send('Você não é o administrador desse grupo.'.encode())
                         # remove o socket do usuário da lista de sockets daquele grupo
                         else:
                             msg = "Você foi removido do grupo " + proc_data[3]
                             usersip[proc_data[4]].send(msg.encode())
                             groups[proc_data[3]].remove(usersip[proc_data[4]])
 
+                    # lista os grupos do qual o utilizador faz parte
+                    elif proc_data[2] == 'lst':
+                        sock.send("Grupos do quais faz parte: ".encode())
+                        for k in groups.keys():
+                            if sock in groups[k]:
+                                msg = k + '\n                           '
+                                sock.send(msg.encode())
+                        else:
+                            sock.send("você não faz parte de grupo algum.\n".encode())
+                                
                     # envia mensagem para o grupo
                     elif proc_data[2] in groups.keys():
-                        # verifica se o grupo existe
-                        if notExistingGroup(proc_data[2]):
-                            sock.send("Esse grupo ainda não foi criado.".encode())
                         # verifica se o usuario que tenta remover um integrante do
                         # grupo faz parte desse grupo
-                        elif userNotInGroup(usersip[nick], proc_data[2]):
+                        if userNotInGroup(usersip[nick], proc_data[2]):
                             sock.send('Você não faz parte desse grupo.'.encode())
                         # envia a mensagem
                         else:
-                            msg = nick+' disse no '+proc_data[2]+': '+" ".join(proc_data[2::])
+                            msg = nick+' disse no grupo '+proc_data[2]+': '+" ".join(proc_data[2::])
                             addToHistory(msg)
 
                             for u in groups[proc_data[2]]:
@@ -215,21 +218,34 @@ while inputs:
                     elif nick not in blocks[proc_data[2]]:
                         # envia a mensagem para o utilizador destino
                         msg = " ".join(proc_data[3::])
-                        addToHistory(nick + " disse privadamente para " + proc_data[2] + msg)
+                        addToHistory(nick+" disse privadamente para "+proc_data[2]+' '+msg)
                         msg = nick + " diz privadamente: " + msg
                         usersip[proc_data[2]].send(msg.encode())
                     
                     else:
                         sock.send("Você foi bloqueado por esse utilizador.".encode())
 
+                else:
+
+                    msg = nick + " diz para todos: " + " ".join(proc_data[1::])
+                    addToHistory(msg)
+                    for s in outputs:
+                        s.send(msg.encode())
+
             else:
-                print("Cliente desconectou")
                 inputs.remove(sock)
                 outputs.remove(sock)
 
+                # remove utilizador dos grupos dos quais faz parte
+                for k in groups.keys():
+                    if sock in groups[k]:
+                        groups[k].remove(sock)
 
+                # remove o utilizador da lista de usuários ativos
+                for k in usersip.keys():
+                    if usersip[k] == sock:
+                        del usersip[k]
+                        break
 
                 sock.close()
-
-
 
